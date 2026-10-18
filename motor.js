@@ -196,7 +196,7 @@ class Partida {
     this.tempoReal += dt;
     const parada = this.estado === "cobranca" || this.cobranca || this.lance || this.gatilho;
     if (this.fimEm === null && !parada && this.indiceJogada >= 0) this.agendarFim(2.0);
-    if (this.inicioJogada != null && this.tempoReal - this.inicioJogada > 25 && !this.lance && !this.cobranca && this.fimEm === null) {
+    if (this.inicioJogada != null && this.tempoReal - this.inicioJogada > 16 && !this.lance && !this.cobranca && this.fimEm === null) {
       this.gatilho = null;
       this.agendarFim(0.5);
     }
@@ -212,6 +212,7 @@ class Partida {
     }
 
     if (this.estado === "parado") {
+      this.relogio += dt;
       this.espera -= dt;
       if (this.repoTime != null) this.ia(dt, true);
       this.moverTodos(dt, true);
@@ -221,6 +222,7 @@ class Partida {
     }
 
     if (this.estado === "cobranca") {
+      this.relogio += dt;
       this.atualizarCobranca(dt);
       this.moverTodos(dt, true);
       this.atualizarBola(dt);
@@ -265,9 +267,10 @@ class Partida {
     const t = Math.random() < 0.5 ? 0 : 1;
     const d = dirDe(t);
     const b = this.bola;
-    const noAtaque = J.tipo === "gol";
+    // Onde a jogada começa: perto de onde o lance vai acontecer
+    const yInicio = J.tipo === "gol" ? aleat(12, 20) : J.area ? aleat(CY - 33, CY - 27) : aleat(-10, 10);
     Object.assign(b, {
-      x: aleat(-14, 14), y: d * (noAtaque ? aleat(2, 12) : aleat(-12, 6)), z: 0,
+      x: aleat(-14, 14), y: d * yInicio, z: 0,
       vx: 0, vy: 0, vz: 0, dono: null, alvo: null, chute: null, maoDe: null, maoPlano: null, reposicao: false
     });
     this.posse = t;
@@ -287,7 +290,8 @@ class Partida {
     this.inicioJogada = this.tempoReal;
     this.cobranca = null;
     this.fimEm = null;
-    const espera = aleat(4.8, 6.6);   // segundos de jogo antes do lance
+    // Segundos de jogo antes do lance (a jogada de gol já começa armada)
+    const espera = J.tipo === "gol" ? 2.5 : aleat(3.8, 5.2);
     this.gatilho = { tipo: J.tipo, plano: J.plano, area: J.area, em: this.tempoReal + espera, time: t };
     if (J.tipo === "lance" && J.area) this.forcarArea = { time: t, ate: Infinity };
     this.estado = "jogo";
@@ -302,18 +306,22 @@ class Partida {
     if (G.tipo === "lance") {
       if (passou < 0 || this.lance) return;
       const c = this.bola.dono;
-      // Lance na área: espera o atacante chegar lá (com limite)
-      if (G.area && passou < 6 && !(c && this.naArea(c.x, c.y + dirDe(c.time) * 1.5, c.time))) return;
+      // Lance na área: espera o atacante chegar lá (no máximo 3 s)
+      if (G.area && passou < 3 && !(c && this.naArea(c.x, c.y + dirDe(c.time) * 1.5, c.time))) return;
       if (!c || c.papel === "gol" || this.bola.chute) {
-        if (passou > 8) { this.gatilho = null; this.agendarFim(0.5); }
+        // Bola solta ou com o goleiro: quem estiver mais perto fica com ela e o lance sai
+        if (passou > 1.2) {
+          const j = this.maisPerto(this.jogadores.filter((p) => this.livre(p) && p.papel !== "gol"), this.bola);
+          if (j) { this.bola.chute = null; this.darBola(j); }
+        }
+        if (passou > 6) { this.gatilho = null; this.agendarFim(0.5); }
         return;
       }
-      this.gatilho = null;
-      this.iniciarLance(c);
+      if (this.iniciarLance(c) !== false) this.gatilho = null;
       return;
     }
     // Jogada de gol: prepara o tipo de gol quando chegar a hora
-    if (G.tipo === "gol" && passou >= -2.5 && !G.armado) {
+    if (G.tipo === "gol" && !G.armado) {
       G.armado = true;
       if (G.plano === "impedimento" || G.plano === "legal-justo") {
         this.golsDuvidosos = [{ minuto: -1, plano: G.plano === "impedimento" ? "impedimento" : "legal", semLimite: true }];
@@ -324,18 +332,18 @@ class Partida {
       }
     }
     // Plano B: se o passe "no detalhe" não saiu, vira um gol normal
-    if (G.tipo === "gol" && passou > 5.5 && this.golsDuvidosos.length) {
+    if (G.tipo === "gol" && passou > 3 && this.golsDuvidosos.length) {
       this.golsDuvidosos = [];
       this.alvoMargem = null;
       this.golGarantido = true;
     }
     // Ainda sem chute: quem estiver com a bola no ataque finaliza
     const c = this.bola.dono;
-    if (G.tipo === "gol" && passou > 9 && this.golGarantido && c && c.time === G.time && c.papel !== "gol") {
+    if (G.tipo === "gol" && passou > 5 && this.golGarantido && c && c.time === G.time && c.papel !== "gol") {
       const d = dirDe(c.time);
       if (Math.hypot(c.x, d * CY - c.y) < 36 && !b_mao(this)) this.chutar(c);
     }
-    if (G.tipo === "gol" && passou > 13) {
+    if (G.tipo === "gol" && passou > 9) {
       // A jogada não virou gol: segue para a próxima
       this.gatilho = null;
       this.golsDuvidosos = [];
@@ -631,7 +639,7 @@ class Partida {
   iniciarLance(A) {
     const defs = this.doTime(1 - A.time).filter((j) => this.livre(j) && j.papel !== "gol");
     const D = this.maisPerto(defs, A);
-    if (!D) return;
+    if (!D || dist(D, A) > 10) return false;   // precisa de um defensor por perto
     const tipo = sortearPeso(this.liga.pesos);
     this.forcarArea = null;
     this.lance = { tipo, A, D, t0: this.relogio, tc: null, fase: "aproximacao", area: false, x: A.x, y: A.y, vantagem: 0, tocou: false };
@@ -672,7 +680,13 @@ class Partida {
       D.alvoX = D.x + ux * 3; D.alvoY = D.y + uy * 3;
       D.lunge = Math.min(1, D.lunge + dt * 3);
       const encostou = L.tipo === "limpa" ? dd < 1.0 : dd < 1.05;
-      if (encostou || t > 1.6) this.contato(L);
+      if (encostou || (t > 1.6 && dd < 2)) this.contato(L);
+      else if (t > 2.8) {
+        // O defensor não chegou: o lance não acontece, tenta de novo logo em seguida
+        this.lance = null;
+        D.lunge = 0;
+        if (!this.gatilho) this.gatilho = { tipo: "lance", area: false, em: this.tempoReal + 0.4, time: A.time };
+      }
       return;
     }
 
@@ -1240,9 +1254,7 @@ class Partida {
       b: [this.bola.x, this.bola.y, this.bola.z, this.bola.giro],
       r: [this.arbitro.x, this.arbitro.y, this.arbitro.ang, this.arbitro.fase]
     };
-    // Durante paradas o relógio não anda; empurra o tempo um pouquinho para manter a ordem
-    const ult = this.frames[this.frames.length - 1];
-    if (ult && f.t <= ult.t) f.t = ult.t + 1 / 30;
+    // O relógio anda em todas as fases gravadas, então o tempo do quadro bate com o do lance
     this.frames.push(f);
     const limite = f.t - GRAVAR_SEG;
     while (this.frames.length && this.frames[0].t < limite) this.frames.shift();
