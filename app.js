@@ -111,7 +111,7 @@ function telaPrejogo() {
   $("confronto").innerHTML = `${escudo(confronto.casa)}<span class="vs">×</span>${escudo(confronto.fora)}`;
   const info = [
     `⏱️ Só os lances importantes: partida de 1 a 2 minutos`,
-    liga.var ? "📺 Esta liga tem VAR: ele pode te chamar no monitor" : "Sem VAR: decida no olho" + (tem("cabine") ? " (ou na sua cabine do VAR)" : ""),
+    liga.var ? "📺 Esta liga tem VAR: ele confere os lances importantes" : tem("cabine") ? "📺 Sua cabine do VAR confere os lances importantes" : "Sem VAR: decida no olho (a Cabine do VAR da loja resolve)",
     tem("replay") ? "🔁 Você tem replay para os lances" : "Sem replay: preste atenção ao vivo",
     `🪙 Até ${liga.moedas} moedas por decisão certa`
   ];
@@ -352,30 +352,47 @@ $("dec-confirmar").addEventListener("click", () => {
     return;
   }
   const item = P.resolverLance(d);
-  // Nas ligas com VAR, um erro em lance importante pode ser revisto
-  if (item.pontos < 3 && deveChamarVar(item)) {
-    P.estado = "pausado";
-    setTimeout(() => chamarVar("lance"), 500);
-    return;
-  }
-  toast({ ...item, moedas: pagar(item) });
-  P.aplicarDecisao(d);
+  P.estado = "pausado";
+  checagemVar(item, "lance", () => {
+    toast({ ...item, moedas: pagar(item) });
+    P.aplicarDecisao(d);
+  });
 });
 
-function deveChamarVar(item) {
-  if (!liga().var || !item.chave) return false;
-  const chance = 0.6 + (tem("equipevar") ? 0.3 : 0);
-  return Math.random() < chance;
+// O VAR existe nas ligas grandes, ou nas outras com a Cabine do VAR
+const temVar = () => liga().var || tem("cabine");
+
+function chanceVar() {
+  const base = liga().var ? 0.85 : 0.65;
+  return Math.min(1, base + (tem("equipevar") ? 0.35 : 0));
+}
+
+// Todo lance importante passa pelo VAR: ele confirma ou te chama ao monitor
+function checagemVar(item, qual, seguir) {
+  if (!temVar() || !item.chave) { seguir(); return; }
+  aviso("📺 VAR checando…");
+  setTimeout(() => {
+    if (!P) return;
+    if (item.pontos < 3 && Math.random() < chanceVar()) {
+      chamarVar(qual);
+      return;
+    }
+    if (item.pontos === 3) {
+      item.titulo = `${item.titulo.replace(" ✅", "")} · VAR confirmou ✅`;
+    }
+    seguir();
+  }, 1400);
 }
 
 // Lance que passou sem apito
 function aposNaoApitar(item) {
-  if (item.pontos < 3 && deveChamarVar(item)) {
-    P.estado = "pausado";
-    chamarVar("lance");
-    return;
-  }
-  toast({ ...item, moedas: pagar(item) });
+  if (!temVar() || !item.chave) { toast({ ...item, moedas: pagar(item) }); return; }
+  const antes = P.estado;
+  P.estado = "pausado";
+  checagemVar(item, "lance", () => {
+    toast({ ...item, moedas: pagar(item) });
+    if (P.estado === "pausado") P.estado = antes;
+  });
 }
 
 let varQual = "lance";
@@ -435,14 +452,12 @@ $("gol-opcoes").addEventListener("click", (e) => {
     return;
   }
   const item = P.decidirGol(escolha);
-  if (item.pontos < 3 && deveChamarVar(item)) {
-    setTimeout(() => chamarVar("gol"), 400);
-    return;
-  }
-  toast({ ...item, moedas: pagar(item) });
-  if (escolha !== "legal") aviso("Gol anulado ❌");
-  else aviso("⚽ GOL!");
-  P.aplicarGol(escolha);
+  checagemVar(item, "gol", () => {
+    toast({ ...item, moedas: pagar(item) });
+    if (escolha !== "legal") aviso("Gol anulado ❌");
+    else aviso("⚽ GOL!");
+    P.aplicarGol(escolha);
+  });
 });
 
 $("gol-replay").addEventListener("click", () => {

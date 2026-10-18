@@ -824,7 +824,8 @@ class Partida {
     const item = {
       tipo: "lance", pontos, max: 3, titulo, texto, verdade: L.tipo, area: L.area,
       // O VAR revisa: lances na área e cartões vermelhos (dados ou que deveriam ter sido dados)
-      chave: L.area || esperadoCartao === "vermelho" || decisao.cartao === "vermelho", decisao, esperadoTipo, esperadoCartao
+      chave: L.area || L.tipo === "simulacao" || esperadoCartao === "vermelho" || decisao.cartao === "vermelho" || decisao.tipo === "penalti",
+      decisao, esperadoTipo, esperadoCartao
     };
     this.registro.push(item);
     this.lanceAnterior = L;
