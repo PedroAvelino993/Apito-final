@@ -724,15 +724,101 @@ h1 {
   background: #0b1220;
 }
 
-#rp-barra {
-  width: 100%;
-  accent-color: var(--neon);
+/* Barra de tempo estilo vídeo: arraste em qualquer ponto */
+.rp-linha-tempo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rp-num {
+  font-size: 0.78rem;
+  color: var(--suave);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: center;
+}
+
+.rp-trilho {
+  flex: 1;
+  position: relative;
+  height: 36px;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.rp-fundo {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.rp-trilho.arrastando .rp-fundo {
+  height: 8px;
+  margin-top: -4px;
+}
+
+.rp-cheio {
+  height: 100%;
+  width: 0;
+  background: var(--neon);
+}
+
+.rp-momento {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 14px;
+  margin: -7px 0 0 -2px;
+  border-radius: 2px;
+  background: #f97316;
+  pointer-events: none;
+}
+
+.rp-bolinha {
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: var(--neon);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  transition: transform 0.1s;
+}
+
+.rp-trilho.arrastando .rp-bolinha {
+  transform: scale(1.3);
 }
 
 .rp-botoes {
   display: flex;
   gap: 6px;
   margin-top: 8px;
+}
+
+.rp-botoes button {
+  touch-action: manipulation;
+}
+
+.rp-principais button {
+  padding: 13px 4px;
+  font-size: 0.95rem;
+}
+
+.rp-principais .rp-play {
+  flex: 1.6;
+  background: var(--neon);
+  color: #0b1220;
+  border-color: var(--neon);
+  font-weight: 900;
 }
 
 .rp-botoes button {

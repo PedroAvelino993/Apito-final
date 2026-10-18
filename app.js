@@ -24,6 +24,23 @@ function guardar() {
 const tem = (id) => !!salvo.melhorias[id];
 const ligaAtual = () => LIGAS[salvo.escolhida];
 
+// ---------- Toques fantasmas ----------
+// Quando um painel abre embaixo do dedo, o "clique" do mesmo toque cairia
+// num botão do painel. Por um instante depois de abrir, ignoramos cliques.
+let bloqueioAte = 0;
+function bloquearCliques(ms = 350) {
+  bloqueioAte = performance.now() + ms;
+}
+const bloqueado = () => performance.now() < bloqueioAte;
+for (const tipo of ["click", "pointerdown", "pointerup"]) {
+  document.addEventListener(tipo, (e) => {
+    if (bloqueado() && e.target.closest && !e.target.closest("#b-apito")) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+}
+
 // ---------- Navegação ----------
 
 const TELAS = ["t-inicio", "t-prejogo", "t-jogo", "t-resultado", "t-loja", "t-regras"];
@@ -256,6 +273,7 @@ function apitar() {
 // ---------- Decisão de lance ----------
 
 function abrirDecisao(modo) {
+  bloquearCliques();
   modoDecisao = modo;
   decisao = { tipo: null, cartao: null };
   $("dec-tag").textContent = modo === "var" ? "📺 Revisão no monitor do VAR" : "Você parou o jogo";
@@ -331,6 +349,7 @@ function aposNaoApitar(item) {
 
 let varQual = "lance";
 function chamarVar(qual) {
+  bloquearCliques();
   varQual = qual;
   som.apito(1);
   $("m-var").hidden = false;
@@ -354,6 +373,7 @@ $("dec-replay").addEventListener("click", () => {
 
 let modoGol = "normal";
 function abrirGol(G, modo = "normal") {
+  bloquearCliques();
   modoGol = modo;
   const time = P.times[G.time][0];
   $("gol-titulo").textContent = modo === "var" ? `Revisão do gol do ${time}` : `Gol do ${time}! Vale?`;
@@ -421,6 +441,8 @@ const rpCanvas = $("rp-canvas");
 const rpCtx = rpCanvas.getContext("2d");
 let rp = null;
 
+let rpId = 0;   // evita dois laços de desenho ao reabrir o replay
+
 function abrirReplay(qual, aoFechar) {
   const dados = P.replay(qual);
   if (!dados || dados.frames.length < 2) {
@@ -430,29 +452,40 @@ function abrirReplay(qual, aoFechar) {
   }
   rp = {
     ...dados, qual, aoFechar,
-    t: dados.frames[0].t, tocando: true,
+    ini: dados.frames[0].t, fim: dados.frames[dados.frames.length - 1].t,
+    t: dados.frames[0].t, tocando: true, arrastando: false,
     lento: tem("lenta"), zoom: tem("zoom"),
     cam: { cx: dados.foco ? dados.foco.x : dados.frames[0].b[0], cy: dados.foco ? dados.foco.y : dados.frames[0].b[1], larg: larguraVista() },
-    ultimo: performance.now()
+    ultimo: performance.now(), id: ++rpId
   };
+  bloquearCliques();
   $("m-replay").hidden = false;
   redimensionar(rpCanvas);
   $("rp-lento").disabled = !tem("lenta");
   $("rp-zoom").disabled = !tem("zoom");
   $("rp-passe").hidden = !(qual === "gol" && dados.passe && tem("linhas"));
   $("rp-info").textContent = qual === "gol" ? "Gol: do passe até a bola entrar" : "Lance: antes e depois do contato";
+  $("rp-total").textContent = segundos(rp.fim - rp.ini);
+  const pos = rp.momento ? (rp.momento - rp.ini) / (rp.fim - rp.ini) : -1;
+  $("rp-momento").hidden = !(pos >= 0 && pos <= 1);
+  $("rp-momento").style.left = `${pos * 100}%`;
   const dicas = [];
   if (!tem("lenta")) dicas.push("🐢 Câmera lenta");
   if (!tem("zoom")) dicas.push("🔍 Ângulo aproximado");
   if (!tem("tatica")) dicas.push("🎯 Câmera tática");
   if (qual === "gol" && !tem("linhas")) dicas.push("📏 Linhas de impedimento");
-  $("rp-dica").textContent = dicas.length ? `Na loja: ${dicas.join(" · ")}` : "Arraste a barra para ver quadro a quadro.";
+  $("rp-dica").textContent = dicas.length
+    ? `Marca laranja = momento do ${qual === "gol" ? "passe" : "contato"} · Na loja: ${dicas.join(", ")}`
+    : `Marca laranja = momento do ${qual === "gol" ? "passe" : "contato"}. Toque na imagem para pausar.`;
   marcarRp();
-  requestAnimationFrame(quadroReplay);
+  const id = rp.id;
+  requestAnimationFrame((t) => quadroReplay(t, id));
 }
 
+const segundos = (s) => `${Math.max(0, s).toFixed(1).replace(".", ",")}s`;
+
 function marcarRp() {
-  $("rp-play").textContent = rp.tocando ? "Pausar" : "▶ Tocar";
+  $("rp-play").textContent = rp.tocando ? "❚❚ Pausar" : "▶ Play";
   $("rp-lento").setAttribute("aria-pressed", String(rp.lento));
   $("rp-zoom").setAttribute("aria-pressed", String(rp.zoom));
 }
@@ -464,16 +497,31 @@ function quadroAt(t) {
   return fr[i];
 }
 
-function quadroReplay(agora) {
-  if (!rp || $("m-replay").hidden) return;
+function irPara_t(t) {
+  rp.t = limitar(t, rp.ini, rp.fim);
+}
+
+function quadroReplay(agora, id) {
+  if (!rp || rp.id !== id || $("m-replay").hidden) return;
   const dt = Math.min(0.05, (agora - rp.ultimo) / 1000);
   rp.ultimo = agora;
-  const ini = rp.frames[0].t, fim = rp.frames[rp.frames.length - 1].t;
-  if (rp.tocando) {
+  if (rp.tocando && !rp.arrastando) {
     rp.t += dt * (rp.lento ? 0.33 : 1);
-    if (rp.t > fim) rp.t = ini;   // repete
+    if (rp.t > rp.fim) rp.t = rp.ini;   // repete
   }
-  $("rp-barra").value = String(Math.round(((rp.t - ini) / (fim - ini)) * 1000));
+  try {
+    desenharReplay(dt);
+  } catch (erro) {
+    console.error(erro);   // um quadro com problema não pode travar o replay
+  }
+  requestAnimationFrame((t) => quadroReplay(t, id));
+}
+
+function desenharReplay(dt) {
+  const fracao = (rp.t - rp.ini) / (rp.fim - rp.ini || 1);
+  $("rp-cheio").style.width = `${fracao * 100}%`;
+  $("rp-bolinha").style.left = `${fracao * 100}%`;
+  $("rp-tempo").textContent = segundos(rp.t - rp.ini);
 
   const f = quadroAt(rp.t);
   // Câmera do replay
@@ -495,33 +543,83 @@ function quadroReplay(agora) {
     ];
   }
   desenharCena(rpCtx, W, H, rp.cam, P, cenaGravada(P, f), extras);
-  // Faixa de "replay"
   rpCtx.fillStyle = "rgba(29,78,216,0.85)";
   rpCtx.fillRect(0, 0, W, 4);
+  rpCtx.textAlign = "left";
   if (rp.lento) {
-    rpCtx.font = "800 13px system-ui"; rpCtx.fillStyle = "#bae6fd"; rpCtx.textAlign = "left";
+    rpCtx.font = "800 13px system-ui"; rpCtx.fillStyle = "#bae6fd";
     rpCtx.fillText("CÂMERA LENTA", 12, H - 14);
+  }
+  if (!rp.tocando) {
+    // Ícone de pausa no meio, como num vídeo
+    rpCtx.fillStyle = "rgba(0,0,0,0.45)";
+    rpCtx.beginPath(); rpCtx.arc(W / 2, H / 2, 34, 0, Math.PI * 2); rpCtx.fill();
+    rpCtx.fillStyle = "#ffffff";
+    rpCtx.beginPath(); rpCtx.moveTo(W / 2 - 10, H / 2 - 16); rpCtx.lineTo(W / 2 + 16, H / 2); rpCtx.lineTo(W / 2 - 10, H / 2 + 16); rpCtx.closePath(); rpCtx.fill();
   }
   if (extras.linhas) {
     rpCtx.font = "700 12px system-ui"; rpCtx.textAlign = "right";
     rpCtx.fillStyle = "#fca5a5"; rpCtx.fillText("— penúltimo defensor", W - 12, H - 30);
     rpCtx.fillStyle = "#7dd3fc"; rpCtx.fillText("— atacante que recebe", W - 12, H - 14);
   }
-  requestAnimationFrame(quadroReplay);
 }
 
-$("rp-play").addEventListener("click", () => { rp.tocando = !rp.tocando; marcarRp(); });
-$("rp-inicio").addEventListener("click", () => { rp.t = rp.frames[0].t; rp.tocando = true; marcarRp(); });
-$("rp-lento").addEventListener("click", () => { rp.lento = !rp.lento; marcarRp(); });
-$("rp-zoom").addEventListener("click", () => { rp.zoom = !rp.zoom; marcarRp(); });
-$("rp-passe").addEventListener("click", () => { rp.t = rp.passe.t; rp.tocando = false; marcarRp(); });
-$("rp-barra").addEventListener("input", (e) => {
-  const ini = rp.frames[0].t, fim = rp.frames[rp.frames.length - 1].t;
-  rp.t = ini + (Number(e.target.value) / 1000) * (fim - ini);
-  rp.tocando = false;
+// Barra de tempo: arraste o dedo em qualquer ponto (como num vídeo)
+const trilho = $("rp-trilho");
+let tocavaAntes = true;
+function posicaoNoTrilho(e) {
+  const r = trilho.getBoundingClientRect();
+  const fr = limitar((e.clientX - r.left) / r.width, 0, 1);
+  irPara_t(rp.ini + fr * (rp.fim - rp.ini));
+}
+trilho.addEventListener("pointerdown", (e) => {
+  if (!rp) return;
+  e.preventDefault();
+  trilho.setPointerCapture(e.pointerId);
+  tocavaAntes = rp.tocando;
+  rp.arrastando = true;
+  trilho.classList.add("arrastando");
+  posicaoNoTrilho(e);
+});
+trilho.addEventListener("pointermove", (e) => {
+  if (rp && rp.arrastando) posicaoNoTrilho(e);
+});
+const soltarTrilho = () => {
+  if (!rp || !rp.arrastando) return;
+  rp.arrastando = false;
+  rp.tocando = tocavaAntes;
+  trilho.classList.remove("arrastando");
+  marcarRp();
+};
+trilho.addEventListener("pointerup", soltarTrilho);
+trilho.addEventListener("pointercancel", soltarTrilho);
+trilho.addEventListener("keydown", (e) => {
+  if (!rp) return;
+  if (e.key === "ArrowLeft") irPara_t(rp.t - 0.2);
+  if (e.key === "ArrowRight") irPara_t(rp.t + 0.2);
+});
+
+// Tocar na imagem pausa ou continua
+rpCanvas.addEventListener("click", () => {
+  if (!rp) return;
+  rp.tocando = !rp.tocando;
   marcarRp();
 });
+
+$("rp-play").addEventListener("click", () => {
+  if (!rp) return;
+  if (!rp.tocando && rp.t >= rp.fim - 0.01) rp.t = rp.ini;
+  rp.tocando = !rp.tocando;
+  marcarRp();
+});
+$("rp-voltar1").addEventListener("click", () => { if (rp) irPara_t(rp.t - 1); });
+$("rp-avancar1").addEventListener("click", () => { if (rp) irPara_t(rp.t + 1); });
+$("rp-inicio").addEventListener("click", () => { if (!rp) return; rp.t = rp.ini; rp.tocando = true; marcarRp(); });
+$("rp-lento").addEventListener("click", () => { if (!rp) return; rp.lento = !rp.lento; marcarRp(); });
+$("rp-zoom").addEventListener("click", () => { if (!rp) return; rp.zoom = !rp.zoom; marcarRp(); });
+$("rp-passe").addEventListener("click", () => { if (!rp) return; rp.t = rp.passe.t; rp.tocando = false; marcarRp(); });
 $("rp-fechar").addEventListener("click", () => {
+  bloquearCliques();
   $("m-replay").hidden = true;
   const fn = rp.aoFechar;
   rp = null;
@@ -656,6 +754,8 @@ document.addEventListener("visibilitychange", () => {
 // ---------- Botões gerais ----------
 
 $("b-apito").addEventListener("pointerdown", (e) => { e.preventDefault(); apitar(); });
+// No iPhone, cancelar o toque evita o clique fantasma depois do apito
+$("b-apito").addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space" && !$("t-jogo").hidden) { e.preventDefault(); apitar(); }
 });

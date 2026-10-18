@@ -147,6 +147,7 @@ class Partida {
     b.toque = j;
     b.vx = b.vy = b.vz = 0;
     b.z = 0;
+    b.reposicao = false;
     this.posse = j.time;
     j.graca = 0.8;
     j.decidir = aleat(1.0, 2.4);
@@ -156,6 +157,14 @@ class Partida {
       j.braco = 0.6;
       this.marcas.push({ t: this.relogio, x: j.x, y: j.y, tipo: "mao" });
     }
+  }
+
+  // Goleiro com a bola: os adversários saem da área e ele lança longe
+  reposicao(gk) {
+    this.estado = "parado";
+    this.espera = 2.0;
+    this.repoTime = gk.time;
+    gk.decidir = 0.2;
   }
 
   reinicio(j, espera = 1.2) {
@@ -187,9 +196,10 @@ class Partida {
 
     if (this.estado === "parado") {
       this.espera -= dt;
+      if (this.repoTime != null) this.ia(dt, true);
       this.moverTodos(dt, true);
       this.gravar(dt);
-      if (this.espera <= 0) this.estado = "jogo";
+      if (this.espera <= 0) { this.estado = "jogo"; this.repoTime = null; }
       return;
     }
 
@@ -229,7 +239,7 @@ class Partida {
 
   // ---------- Inteligência dos jogadores ----------
 
-  ia(dt) {
+  ia(dt, soPosicao = false) {
     const b = this.bola;
     const c = b.dono;
     const linhas = [this.linhaDefesa(0), this.linhaDefesa(1)];
@@ -269,9 +279,14 @@ class Partida {
         const oscila = Math.sin(this.relogio * 0.45 + j.semente) * 2.3 + 0.9;
         y = linhas[j.time] + d * oscila;
       }
+      // Na reposição do goleiro, os adversários ficam fora da grande área
+      if (this.repoTime != null && j.time !== this.repoTime && d * y > CY - AREA_Y - 3) {
+        y = d * (CY - AREA_Y - 3);
+      }
       j.alvoX = limitar(x, -CX + 1.5, CX - 1.5);
       j.alvoY = limitar(y, -CY + 2, CY - 2);
     }
+    if (soPosicao) return;
 
     if (c && this.livre(c)) {
       this.iaPortador(c, dt);
@@ -379,7 +394,7 @@ class Partida {
     for (const t of forcado ? [] : this.doTime(c.time)) {
       if (t === c || !this.livre(t) || t.papel === "gol") continue;
       const dd = dist(t, c);
-      if (dd < 7 || dd > (longo ? 45 : 36)) continue;
+      if (dd < (longo ? 18 : 7) || dd > (longo ? 45 : 36)) continue;
       const adv = this.maisPerto(this.doTime(1 - c.time), t);
       const pressao = adv ? Math.max(0, 6 - dist(adv, t)) : 0;
       const s = d * (t.y - c.y) * 0.9 - dd * 0.12 - pressao * 2 + aleat(0, 8) + (t.papel === "ata" ? 3 : 0);
@@ -398,6 +413,7 @@ class Partida {
     b.alvo = melhor;
     b.toque = c;
     b.tPasse = this.relogio;
+    b.reposicao = c.papel === "gol";
     b.maoDe = null;
     c.decidir = 9;
     this.ultimoPasse = { t: this.relogio, de: c, para: melhor, ...this.calcularImpedimento(melhor) };
@@ -789,7 +805,7 @@ class Partida {
         gk.lunge = 1;
         b.chute = null;
         this.darBola(gk);
-        gk.decidir = 1.6;
+        this.reposicao(gk);
         this.aoEvento("aviso", "🧤 Defesa!");
         som.torcida(0.4);
         return;
@@ -803,7 +819,8 @@ class Partida {
       const gk = this.goleiro(1 - timeGol);
       b.x = 0; b.y = Math.sign(b.y) * (CY - 5);
       gk.x = 0; gk.y = b.y;
-      return this.reinicio(gk, 1.4);
+      this.darBola(gk);
+      return this.reposicao(gk);
     }
     // Lateral
     if (Math.abs(b.x) > CX) {
@@ -828,7 +845,7 @@ class Partida {
       const alcance = j === b.alvo ? 1.3 : 0.95;
       if (dist(j, b) < alcance) {
         const profundidade = this.ultimoPasse && this.ultimoPasse.duvidoso && b.alvo === this.ultimoPasse.para;
-        if (b.alvo && j.time !== b.alvo.time && (profundidade || Math.random() < 0.5)) continue;
+        if (b.alvo && j.time !== b.alvo.time && (profundidade || b.reposicao || Math.random() < 0.5)) continue;
         this.darBola(j);
         if (j.braco > 0) {
           // dominou com o braço: a bola dá uma desviada
@@ -1015,7 +1032,8 @@ class Partida {
     }
     const frames = this.frames.filter((f) => f.t >= inicio && f.t <= fim);
     const marcas = this.marcas.filter((m) => m.t >= inicio - 0.1 && m.t <= fim + 0.1);
-    return { frames, inicio, fim, foco, passe, marcas, seguir: seguir ?? null };
+    const momento = qual === "gol" && this.golPendente ? (passe ? passe.t : this.golPendente.t) : (this.lance || this.lanceAnterior).tc;
+    return { frames, inicio, fim, foco, passe, marcas, momento, seguir: seguir ?? null };
   }
 
   resumo() {

@@ -139,10 +139,22 @@
     </div>
     <canvas id="rp-canvas"></canvas>
     <div class="replay-controles">
-      <input type="range" id="rp-barra" min="0" max="1000" value="0" aria-label="Posição do replay">
+      <div class="rp-linha-tempo">
+        <span class="rp-num" id="rp-tempo">0,0s</span>
+        <div class="rp-trilho" id="rp-trilho" role="slider" aria-label="Posição do replay" tabindex="0">
+          <div class="rp-fundo"><div class="rp-cheio" id="rp-cheio"></div></div>
+          <div class="rp-momento" id="rp-momento"></div>
+          <div class="rp-bolinha" id="rp-bolinha"></div>
+        </div>
+        <span class="rp-num" id="rp-total">0,0s</span>
+      </div>
+      <div class="rp-botoes rp-principais">
+        <button id="rp-voltar1">⏪ 1s</button>
+        <button id="rp-play" class="rp-play">❚❚ Pausar</button>
+        <button id="rp-avancar1">1s ⏩</button>
+      </div>
       <div class="rp-botoes">
-        <button id="rp-inicio">↺ Início</button>
-        <button id="rp-play">Pausar</button>
+        <button id="rp-inicio">↺ Do início</button>
         <button id="rp-lento">🐢 Lento</button>
         <button id="rp-zoom">🔍 Zoom</button>
         <button id="rp-passe">📏 Passe</button>
