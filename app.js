@@ -202,6 +202,8 @@ function atualizarHud() {
   const n = Math.max(1, Math.min(P.indiceJogada + 1, P.jogadas.length));
   $("h-liga").textContent = `${ligaAtual().nome} · jogada ${n}/${P.jogadas.length}`;
   $("h-moedas").textContent = `🪙 +${moedasPartida}`;
+  // Durante pênalti e falta não há o que apitar: o botão some para mostrar o gol
+  $("b-apito").style.visibility = P.cobranca || P.estado === "cobranca" ? "hidden" : "visible";
 }
 
 function quadro(agora) {
@@ -227,12 +229,19 @@ function moverCamera(dt) {
   const W = canvas.width / dpr, H = canvas.height / dpr;
   const b = P.bola;
   const k = 1 - Math.exp(-3 * dt);
-  const alvoX = b.x * 0.75, alvoY = b.y + 4;
+  let alvoX = b.x * 0.75, alvoY = b.y + 4;
+  // Na cobrança, mostra a bola e o gol juntos
+  if (P.cobranca) {
+    const golY = (P.cobranca.time === 0 ? -1 : 1) * CY;
+    alvoX = b.x * 0.5;
+    alvoY = (b.y + golY) / 2;
+  }
   cam.cx += (alvoX - cam.cx) * k;
   cam.cy += (alvoY - cam.cy) * k;
   const meiaW = cam.larg / 2, meiaH = (cam.larg * H / W) / 2;
   cam.cx = limitar(cam.cx, -CX - 7 + meiaW, CX + 7 - meiaW);
-  cam.cy = meiaH < CY + 10 ? limitar(cam.cy, -CY - 10 + meiaH, CY + 10 - meiaH) : 0;
+  const borda = P.cobranca ? 24 : 10;   // na cobrança a câmera pode mostrar o gol mais no meio da tela
+  cam.cy = meiaH < CY + borda ? limitar(cam.cy, -CY - borda + meiaH, CY + borda - meiaH) : 0;
 }
 
 // Eventos que a partida manda para a tela

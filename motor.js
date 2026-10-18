@@ -194,6 +194,12 @@ class Partida {
 
     // Fim da jogada atual: passa para a próxima
     this.tempoReal += dt;
+    const parada = this.estado === "cobranca" || this.cobranca || this.lance || this.gatilho;
+    if (this.fimEm === null && !parada && this.indiceJogada >= 0) this.agendarFim(2.0);
+    if (this.inicioJogada != null && this.tempoReal - this.inicioJogada > 25 && !this.lance && !this.cobranca && this.fimEm === null) {
+      this.gatilho = null;
+      this.agendarFim(0.5);
+    }
     if (this.fimEm !== null && this.tempoReal >= this.fimEm && !this.lance) {
       this.fimEm = null;
       return this.encerrarJogada();
@@ -214,8 +220,8 @@ class Partida {
       return;
     }
 
-    if (this.estado === "penalti") {
-      this.atualizarPenalti(dt);
+    if (this.estado === "cobranca") {
+      this.atualizarCobranca(dt);
       this.moverTodos(dt, true);
       this.atualizarBola(dt);
       this.gravar(dt);
@@ -278,6 +284,9 @@ class Partida {
     this.darBola(c);
     c.decidir = aleat(1.2, 2.2);
 
+    this.inicioJogada = this.tempoReal;
+    this.cobranca = null;
+    this.fimEm = null;
     const espera = aleat(4.8, 6.6);   // segundos de jogo antes do lance
     this.gatilho = { tipo: J.tipo, plano: J.plano, area: J.area, em: this.tempoReal + espera, time: t };
     if (J.tipo === "lance" && J.area) this.forcarArea = { time: t, ate: Infinity };
@@ -837,20 +846,32 @@ class Partida {
     }
     for (const j of [A, D]) if (!j.expulso) j.caido = Math.min(j.caido, 0.6);
 
-    if (decisao.tipo !== "penalti") this.agendarFim(2.2);
+    this.fimEm = null;
+    const d = dirDe(A.time);
+    const distGol = Math.hypot(L.x, d * CY - L.y);
+    const perigosa = decisao.tipo === "falta" && distGol < 30 && Math.abs(L.x) < 24 && !this.naArea(L.x, L.y, A.time);
     if (decisao.tipo === "penalti") {
       this.iniciarPenalti(A.time);
+    } else if (perigosa) {
+      this.iniciarCobranca("falta", A.time, { x: L.x, y: L.y });
     } else if (decisao.tipo === "falta") {
       const cobrador = this.livre(A) && !A.expulso ? A : this.maisPerto(this.doTime(A.time).filter((j) => !j.expulso), A);
       this.bola.x = L.x; this.bola.y = L.y;
-      cobrador.x = L.x; cobrador.y = L.y - dirDe(A.time) * 0.6;
+      cobrador.x = L.x; cobrador.y = L.y - d * 0.6;
       this.reinicio(cobrador, 1.4);
+      cobrador.decidir = 0.3;   // cobra rápido, rolando para um companheiro
+      this.aoEvento("aviso", `Falta para o ${this.times[A.time][0]}`);
+      this.agendarFim(3.4);
     } else if (decisao.tipo === "simulacao") {
       const cobrador = this.livre(D) && !D.expulso ? D : this.maisPerto(this.doTime(D.time).filter((j) => !j.expulso), D);
       this.reinicio(cobrador, 1.4);
+      this.aoEvento("aviso", `Falta de ataque: bola do ${this.times[D.time][0]}`);
+      this.agendarFim(2.8);
     } else {
       const quem = this.maisPerto(this.doTime(this.posse).filter((j) => !j.expulso), this.bola);
       this.reinicio(quem, 1.2);
+      this.aoEvento("aviso", "Bola ao chão");
+      this.agendarFim(2.4);
     }
   }
 
@@ -868,44 +889,105 @@ class Partida {
     som.cartao();
   }
 
-  // ---------- Pênalti ----------
+  // ---------- Bola parada: pênalti e falta direta ----------
 
-  iniciarPenalti(time) {
+  iniciarCobranca(tipo, time, pos) {
     const d = dirDe(time);
-    const cobrador = this.doTime(time).filter((j) => j.papel === "ata")[0] || this.doTime(time)[9] || this.doTime(time)[1];
-    const gk = this.goleiro(1 - time);
-    this.penalti = { time, cobrador, gk, t: 0, gol: Math.random() < 0.76, lado: Math.random() < 0.5 ? -1 : 1 };
     const b = this.bola;
-    Object.assign(b, { x: 0, y: d * (CY - 11), z: 0, vx: 0, vy: 0, vz: 0, dono: null, alvo: null, chute: null });
-    cobrador.x = 0.5; cobrador.y = b.y - d * 2.5;
+    const gk = this.goleiro(1 - time);
+    const meus = this.doTime(time).filter((j) => j.papel !== "gol");
+    const cobrador = tipo === "penalti"
+      ? (meus.find((j) => j.papel === "ata") || meus[meus.length - 1])
+      : this.maisPerto(meus, pos);
+    const r = Math.random();
+    const resultado = tipo === "penalti"
+      ? (r < 0.76 ? "gol" : r < 0.93 ? "defesa" : "fora")
+      : (r < 0.24 ? "gol" : r < 0.66 ? "defesa" : "fora");
+    const lado = Math.random() < 0.5 ? -1 : 1;
+    Object.assign(b, { x: pos.x, y: pos.y, z: 0, vx: 0, vy: 0, vz: 0, dono: null, alvo: null, chute: null, maoDe: null });
+
+    // Cobrador atrás da bola, goleiro na linha
+    const gx = 0, gy = d * CY;
+    const ang = Math.atan2(gy - b.y, gx - b.x);
+    cobrador.x = b.x - Math.cos(ang) * 2.4; cobrador.y = b.y - Math.sin(ang) * 2.4;
+    cobrador.ang = ang;
     gk.x = 0; gk.y = d * (CY - 0.6);
-    for (const j of this.jogadores) {
-      if (j === cobrador || j === gk || j.expulso) continue;
-      j.alvoX = limitar(j.x, -AREA_X + 2, AREA_X - 2);
-      j.alvoY = d * (CY - AREA_Y - 2 - Math.random() * 6);
+
+    // Barreira a 9,15 m, entre a bola e o gol
+    const barreira = [];
+    if (tipo === "falta") {
+      const defs = this.doTime(1 - time).filter((j) => j.papel !== "gol").sort((p1, p2) => dist(p1, b) - dist(p2, b)).slice(0, 4);
+      const px = -Math.sin(ang), py = Math.cos(ang);
+      defs.forEach((j, i) => {
+        const off = (i - 1.5) * 0.85;
+        j.alvoX = b.x + Math.cos(ang) * 9.15 + px * off;
+        j.alvoY = b.y + Math.sin(ang) * 9.15 + py * off;
+        j.x = j.alvoX; j.y = j.alvoY; j.ang = ang + Math.PI;
+        barreira.push(j);
+      });
     }
-    this.estado = "penalti";
-    this.aoEvento("aviso", "⚽ Pênalti!");
+    // O resto do pessoal fica de fora do caminho
+    for (const j of this.jogadores) {
+      if (j === cobrador || j === gk || j.expulso || barreira.includes(j)) continue;
+      if (tipo === "penalti") {
+        j.alvoX = limitar(j.x, -AREA_X + 2, AREA_X - 2);
+        j.alvoY = d * (CY - AREA_Y - 2 - Math.random() * 6);
+      } else {
+        j.alvoX = limitar(j.x, -CX + 2, CX - 2);
+        j.alvoY = limitar(j.y, -CY + 3, CY - 3);
+        if (dist(j, b) < 9.5) { j.alvoX = j.x + (j.x - b.x) * 0.6; j.alvoY = j.y + (j.y - b.y) * 0.6; }
+      }
+      j.vx = j.vy = 0;
+    }
+    this.cobranca = { tipo, time, cobrador, gk, t: 0, resultado, lado, barreira };
+    this.estado = "cobranca";
+    this.fimEm = null;
+    this.aoEvento("aviso", tipo === "penalti" ? "⚽ Pênalti!" : "🎯 Falta perigosa!");
   }
 
-  atualizarPenalti(dt) {
-    const P = this.penalti;
-    P.t += dt;
-    const d = dirDe(P.time);
+  iniciarPenalti(time) {
+    this.iniciarCobranca("penalti", time, { x: 0, y: dirDe(time) * (CY - 11) });
+  }
+
+  atualizarCobranca(dt) {
+    const C = this.cobranca;
+    C.t += dt;
+    const d = dirDe(C.time);
     const b = this.bola;
-    P.cobrador.alvoX = b.x; P.cobrador.alvoY = b.y - d * 0.6;
-    P.gk.alvoX = 0; P.gk.alvoY = d * (CY - 0.6);
-    if (P.t > 1.5 && !P.chutou) {
-      P.chutou = true;
-      const tx = P.lado * aleat(1.2, 3.1);
-      const dd = Math.hypot(tx - b.x, d * (CY + 1) - b.y);
-      b.vx = (tx - b.x) / dd * 24; b.vy = (d * (CY + 1) - b.y) / dd * 24; b.vz = 1.5;
-      b.toque = P.cobrador;
-      b.chute = { de: P.cobrador, noAlvo: true, defende: !P.gol, penalti: true };
-      P.gk.alvoX = (P.gol ? -P.lado : P.lado) * 3;
-      som.chute(0.8);
+    for (const j of C.barreira) { j.vx = j.vy = 0; }
+    C.gk.alvoY = d * (CY - 0.6);
+    C.gk.alvoX = C.tipo === "falta" ? -Math.sign(b.x || 1) * 1.2 : 0;
+    // Corrida para a bola
+    if (C.t > 1.1) { C.cobrador.alvoX = b.x; C.cobrador.alvoY = b.y; }
+    if (C.t > 1.6 && !C.chutou) {
+      C.chutou = true;
+      const ty = d * CY;
+      let tx;
+      if (C.resultado === "gol") tx = C.lado * aleat(2.3, 3.3);
+      else if (C.resultado === "defesa") tx = C.lado * aleat(0.6, 2.4);
+      else tx = C.lado * aleat(4.4, 6.5);
+      const vel = C.tipo === "penalti" ? 24 : 21;
+      const dd = Math.hypot(tx - b.x, ty - b.y);
+      b.vx = (tx - b.x) / dd * vel; b.vy = (ty - b.y) / dd * vel;
+      // A falta sobe por cima da barreira e desce no gol
+      b.vz = C.tipo === "falta" ? 7.3 * (dd / vel) : 1.2;
+      b.toque = C.cobrador;
+      b.dono = null;
+      b.alvo = null;
+      b.chute = { de: C.cobrador, noAlvo: C.resultado !== "fora", defende: C.resultado === "defesa", bolaParada: C.tipo };
+      // Goleiro: no gol ele pula para o lado errado
+      C.gk.alvoX = C.resultado === "gol" ? -C.lado * 2.5 : tx;
+      som.chute(0.85);
     }
-    if (P.chutou) this.estado = "jogo";
+    if (C.chutou && C.t > 1.7) this.estado = "jogo";
+  }
+
+  // Avisa o resultado da bola parada e encerra a jogada
+  resultadoCobranca(texto) {
+    if (!this.cobranca) return;
+    this.cobranca = null;
+    this.aoEvento("aviso", texto);
+    this.agendarFim(2.4);
   }
 
   // ---------- Bola ----------
@@ -939,8 +1021,15 @@ class Partida {
     if (b.chute) {
       const gk = this.goleiro(1 - b.chute.de.time);
       const chegou = gk && Math.abs(b.y - gk.y) < 1.4;
-      if (gk && b.chute.defende && chegou && b.z < 2.6) {
-        if (b.chute.penalti) this.agendarFim(2.2);
+      if (gk && b.chute.defende && chegou && b.z < 2.8) {
+        if (b.chute.bolaParada) {
+          const tipoBola = b.chute.bolaParada;
+          b.chute = null;
+          this.darBola(gk);
+          this.reposicao(gk);
+          this.resultadoCobranca(tipoBola === "penalti" ? "🧤 Pênalti defendido!" : "🧤 O goleiro defendeu a falta!");
+          return;
+        }
         gk.x = b.x - Math.sign(b.x - gk.x) * 0.4;   // o goleiro se estica até a bola
         gk.lunge = 1;
         b.chute = null;
@@ -956,6 +1045,10 @@ class Partida {
     if (Math.abs(b.y) > CY) {
       const timeGol = b.y < 0 ? 0 : 1;   // time que ataca para esse lado
       if (Math.abs(b.x) < GOL_X && b.z < 2.44) return this.marcarGol(timeGol);
+      if (b.chute && b.chute.bolaParada) {
+        this.resultadoCobranca(b.chute.bolaParada === "penalti" ? "❌ Pênalti pra fora!" : "❌ A falta foi pra fora!");
+        b.chute = null;
+      }
       const gk = this.goleiro(1 - timeGol);
       b.x = 0; b.y = Math.sign(b.y) * (CY - 5);
       gk.x = 0; gk.y = b.y;
@@ -971,11 +1064,8 @@ class Partida {
       return;
     }
 
-    if (b.chute && !b.chute.penalti) {
-      // chute em andamento: ninguém intercepta além do goleiro
-      return;
-    }
-    if (b.chute && b.chute.penalti) return;
+    if (b.chute) return;   // chute em andamento: só o goleiro pode pegar
+    if (this.estado === "cobranca") return;   // bola parada: ninguém encosta antes do chute
 
     // Alguém domina a bola
     for (const j of this.jogadores) {
@@ -1002,7 +1092,7 @@ class Partida {
     b.vx *= 0.2; b.vy *= 0.2;
     const autor = b.chute ? b.chute.de : b.toque;
     let verdade = "legal";
-    if (b.chute && b.chute.penalti) verdade = "penalti";
+    if (b.chute && b.chute.bolaParada) verdade = "penalti";
     else if (b.maoDe && b.maoDe === autor) verdade = "mao";
     else if (this.ultimoPasse && this.ultimoPasse.para === autor && this.ultimoPasse.impedido && this.relogio - this.ultimoPasse.t < 9) verdade = "impedimento";
     b.chute = null;
@@ -1012,10 +1102,12 @@ class Partida {
     this.flash = 0.3;
 
     if (verdade === "penalti") {
-      // Pênalti convertido não precisa de revisão
+      // Gol de bola parada (pênalti ou falta direta) não precisa de revisão
       this.placar[time]++;
-      this.agendarFim(2.2);
-      this.aoEvento("aviso", `⚽ GOL de pênalti! ${this.times[time][0]}`);
+      const tipoBola = this.cobranca ? this.cobranca.tipo : "penalti";
+      this.cobranca = null;
+      this.agendarFim(2.6);
+      this.aoEvento("aviso", tipoBola === "falta" ? `⚽ GOLAÇO de falta!` : `⚽ GOL de pênalti!`);
       this.aoEvento("placar");
       this.golPendente = null;
       this.estado = "parado";
