@@ -4,7 +4,7 @@ Simulador de árbitro de futebol para celular. Você apita partidas, dá cartõe
 
 ## Como jogar
 
-- A partida passa sozinha (cerca de 4 minutos). Quando um jogador cair, decida rápido: **toque em APITAR** se foi falta, ou deixe o jogo seguir.
+- A partida mostra só os melhores momentos (de 1 a 2 minutos): cada jogada começa uns 5 a 8 segundos antes do lance, com a bola rolando, e depois pula para a próxima. Quando um jogador cair, decida rápido: **toque em APITAR** se foi falta, ou deixe o jogo seguir.
 - Depois de apitar, escolha o que marcou (falta, pênalti, simulação ou lance normal) e o cartão.
 - Nos gols, decida se vale ou se foi impedimento ou toque de mão.
 - Cada decisão certa dá moedas. Nota 7 ou mais conta para subir de liga.

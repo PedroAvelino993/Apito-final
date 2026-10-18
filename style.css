@@ -1043,3 +1043,39 @@ h1 {
 .dica {
   color: var(--suave);
 }
+
+/* Vinheta entre as jogadas */
+.transicao {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  background: rgba(6, 10, 20, 0.78);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: aparecer 0.25s ease-out;
+  pointer-events: none;
+}
+
+.tr-min {
+  font-size: 3.4rem;
+  font-weight: 900;
+  color: var(--neon);
+  font-variant-numeric: tabular-nums;
+  animation: surgir2 0.4s cubic-bezier(.2, 1.4, .4, 1);
+}
+
+.tr-sub {
+  font-weight: 700;
+  color: var(--suave);
+  margin-top: 4px;
+}
+
+@keyframes aparecer {
+  from { opacity: 0; }
+}
+
+@keyframes surgir2 {
+  from { transform: scale(0.6); opacity: 0; }
+}

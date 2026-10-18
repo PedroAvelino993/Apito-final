@@ -60,12 +60,15 @@ class Partida {
     this.particulas = [];
     this.flash = 0;
 
-    // 1 ou 2 gols "no detalhe" por partida (impedimento por pouco ou legal por pouco)
-    this.golsDuvidosos = Array.from({ length: Math.random() < 0.5 ? 1 : 2 }, () => ({
-      minuto: aleat(12, 82), plano: Math.random() < 0.5 ? "impedimento" : "legal"
-    })).sort((a, b) => a.minuto - b.minuto);
-    const n = liga.incidentes;
-    this.agenda = Array.from({ length: n }, (_, i) => 4 + (i + aleat(0.15, 0.85)) * (84 / n));
+    // A partida é um resumo: só as jogadas que importam para o árbitro.
+    // Cada jogada começa alguns segundos antes do lance, com a bola rolando.
+    this.golsDuvidosos = [];
+    this.agenda = [];
+    this.jogadas = montarJogadas(liga);
+    this.indiceJogada = -1;
+    this.tempoReal = 0;
+    this.fimEm = null;
+    this.gatilho = null;
 
     this.jogadores = [];
     for (let t = 0; t < 2; t++) {
@@ -85,6 +88,7 @@ class Partida {
     this.bola = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, dono: null, alvo: null, giro: 0, chute: null, toque: null };
     this.torcida = gerarTorcida();
     this.saidaDeBola(0);
+    this.estado = "transicao";   // a tela chama proximaJogada() depois da vinheta
   }
 
   // ---------- Utilidades ----------
@@ -186,7 +190,14 @@ class Partida {
   atualizar(dt) {
     if (this.flash > 0) this.flash -= dt;
     this.atualizarParticulas(dt);
-    if (this.estado === "decisao" || this.estado === "gol" || this.estado === "fim" || this.estado === "pausado") return;
+    if (["decisao", "gol", "fim", "pausado", "transicao"].includes(this.estado)) return;
+
+    // Fim da jogada atual: passa para a próxima
+    this.tempoReal += dt;
+    if (this.fimEm !== null && this.tempoReal >= this.fimEm && !this.lance) {
+      this.fimEm = null;
+      return this.encerrarJogada();
+    }
 
     if (this.estado === "intervalo") {
       this.espera -= dt;
@@ -211,30 +222,139 @@ class Partida {
       return;
     }
 
-    // Relógio da partida
+    // Relógio: durante a jogada ele anda devagar (são só alguns segundos de jogo)
     this.relogio += dt;
-    this.minuto += dt / SEG_POR_MINUTO;
-    if (this.tempo === 1 && this.minuto >= 45 && !this.lance) {
-      this.minuto = 45;
-      this.estado = "intervalo";
-      this.espera = 2.5;
-      this.aoEvento("intervalo");
-      som.apito(2);
-      return;
-    }
-    if (this.tempo === 2 && this.minuto >= 90 + this.acrescimo && !this.lance) {
-      this.estado = "fim";
-      som.apito(3);
-      this.aoEvento("fim", this.resumo());
-      return;
-    }
-
-    this.agendarLances();
+    this.minuto += dt / 40;
+    this.dispararGatilho();
     this.ia(dt);
     this.atualizarLance(dt);
     this.moverTodos(dt, false);
     this.atualizarBola(dt);
     this.gravar(dt);
+  }
+
+  // ---------- Jogadas (o resumo da partida) ----------
+
+  proximaJogada() {
+    this.indiceJogada++;
+    const J = this.jogadas[this.indiceJogada];
+    if (!J) {
+      this.estado = "fim";
+      som.apito(3);
+      this.aoEvento("fim", this.resumo());
+      return;
+    }
+    this.minuto = J.minuto;
+    this.tempo = J.minuto >= 45 ? 2 : 1;
+    this.lance = null;
+    this.forcarArea = null;
+    this.golGarantido = false;
+    this.forcarMao = false;
+    this.golsDuvidosos = [];
+    this.alvoMargem = null;
+    this.penalti = null;
+    for (const j of this.jogadores) { j.caido = 0; j.vx = j.vy = 0; j.lunge = 0; j.braco = 0; }
+
+    // Monta a cena: um time com a bola, todos posicionados em volta dela
+    const t = Math.random() < 0.5 ? 0 : 1;
+    const d = dirDe(t);
+    const b = this.bola;
+    const noAtaque = J.tipo === "gol";
+    Object.assign(b, {
+      x: aleat(-14, 14), y: d * (noAtaque ? aleat(2, 12) : aleat(-12, 6)), z: 0,
+      vx: 0, vy: 0, vz: 0, dono: null, alvo: null, chute: null, maoDe: null, maoPlano: null, reposicao: false
+    });
+    this.posse = t;
+    this.ia(0, true);
+    for (const j of this.jogadores) {
+      if (j.expulso) continue;
+      j.x = j.alvoX + aleat(-1.5, 1.5);
+      j.y = j.alvoY + aleat(-1.5, 1.5);
+      j.ang = Math.atan2(d * (j.time === t ? 1 : -1), 0);
+    }
+    const meias = this.doTime(t).filter((j) => j.papel === "mei");
+    const c = this.maisPerto(meias.length ? meias : this.doTime(t), b);
+    c.x = b.x; c.y = b.y - d * 0.7;
+    this.darBola(c);
+    c.decidir = aleat(1.2, 2.2);
+
+    const espera = aleat(4.8, 6.6);   // segundos de jogo antes do lance
+    this.gatilho = { tipo: J.tipo, plano: J.plano, area: J.area, em: this.tempoReal + espera, time: t };
+    if (J.tipo === "lance" && J.area) this.forcarArea = { time: t, ate: Infinity };
+    this.estado = "jogo";
+    this.marcas = [];
+    som.apito(1);
+  }
+
+  dispararGatilho() {
+    const G = this.gatilho;
+    if (!G) return;
+    const passou = this.tempoReal - G.em;
+    if (G.tipo === "lance") {
+      if (passou < 0 || this.lance) return;
+      const c = this.bola.dono;
+      // Lance na área: espera o atacante chegar lá (com limite)
+      if (G.area && passou < 6 && !(c && this.naArea(c.x, c.y + dirDe(c.time) * 1.5, c.time))) return;
+      if (!c || c.papel === "gol" || this.bola.chute) {
+        if (passou > 8) { this.gatilho = null; this.agendarFim(0.5); }
+        return;
+      }
+      this.gatilho = null;
+      this.iniciarLance(c);
+      return;
+    }
+    // Jogada de gol: prepara o tipo de gol quando chegar a hora
+    if (G.tipo === "gol" && passou >= -2.5 && !G.armado) {
+      G.armado = true;
+      if (G.plano === "impedimento" || G.plano === "legal-justo") {
+        this.golsDuvidosos = [{ minuto: -1, plano: G.plano === "impedimento" ? "impedimento" : "legal", semLimite: true }];
+        this.alvoMargem = G.plano === "impedimento" ? 1.3 : -0.9;
+      } else {
+        this.golGarantido = true;
+        if (G.plano === "mao") this.forcarMao = true;
+      }
+    }
+    // Plano B: se o passe "no detalhe" não saiu, vira um gol normal
+    if (G.tipo === "gol" && passou > 5.5 && this.golsDuvidosos.length) {
+      this.golsDuvidosos = [];
+      this.alvoMargem = null;
+      this.golGarantido = true;
+    }
+    // Ainda sem chute: quem estiver com a bola no ataque finaliza
+    const c = this.bola.dono;
+    if (G.tipo === "gol" && passou > 9 && this.golGarantido && c && c.time === G.time && c.papel !== "gol") {
+      const d = dirDe(c.time);
+      if (Math.hypot(c.x, d * CY - c.y) < 36 && !b_mao(this)) this.chutar(c);
+    }
+    if (G.tipo === "gol" && passou > 13) {
+      // A jogada não virou gol: segue para a próxima
+      this.gatilho = null;
+      this.golsDuvidosos = [];
+      this.golGarantido = false;
+      this.agendarFim(0.3);
+    }
+  }
+
+  // Na jogada de gol, o time que ataca não perde a bola antes de finalizar
+  ataqueProtegido(time) {
+    return !!(this.gatilho && this.gatilho.tipo === "gol" && this.gatilho.time === time);
+  }
+
+  agendarFim(segundos) {
+    this.fimEm = this.tempoReal + segundos;
+  }
+
+  encerrarJogada() {
+    const proxima = this.jogadas[this.indiceJogada + 1];
+    const atual = this.jogadas[this.indiceJogada];
+    this.estado = "transicao";
+    this.gatilho = null;
+    this.aoEvento("transicao", {
+      proxima: proxima ? proxima.minuto : null,
+      intervalo: !!(proxima && atual && atual.minuto < 45 && proxima.minuto >= 45),
+      numero: this.indiceJogada + 2,
+      total: this.jogadas.length
+    });
   }
 
   // ---------- Inteligência dos jogadores ----------
@@ -276,7 +396,11 @@ class Partida {
       if (j.papel === "ata" && atacando) {
         // Atacantes ficam rondando a linha do impedimento
         // (+2 compensa o atraso de quem corre atrás de um alvo que anda)
-        const oscila = Math.sin(this.relogio * 0.45 + j.semente) * 2.3 + 0.9;
+        let oscila = Math.sin(this.relogio * 0.45 + j.semente) * 2.3 + 0.9;
+        // Jogada de gol "no detalhe": os atacantes buscam a margem planejada
+        if (this.alvoMargem != null && this.gatilho && j.time === this.gatilho.time) {
+          oscila = this.alvoMargem + 1.4 + Math.sin(this.relogio * 1.3 + j.semente) * 0.5;
+        }
         y = linhas[j.time] + d * oscila;
       }
       // Na reposição do goleiro, os adversários ficam fora da grande área
@@ -340,7 +464,8 @@ class Partida {
       c.decidir = 0.5;   // recebeu na frente: vai finalizar rápido
     }
     if (c.decidir <= 0 && !forcar) {
-      if (distGol < 22 && Math.random() < 0.3) this.chutar(c);
+      const querGol = this.golGarantido && (!b_mao(this) || this.bola.maoDe === c);
+      if (distGol < (querGol ? 26 : 22) && Math.random() < (querGol ? 0.9 : 0.3)) this.chutar(c);
       else if (!this.passar(c)) c.decidir = 0.7;
     }
   }
@@ -353,7 +478,7 @@ class Partida {
       p1.alvoX = c.x + c.vx * 0.2;
       p1.alvoY = c.y + c.vy * 0.2;
       // Desarme limpo de rotina (sem queda, não é lance para apitar)
-      if (!this.lance && c.graca <= 0 && dist(p1, c) < 1.3 && Math.random() < 0.022) {
+      if (!this.lance && !this.ataqueProtegido(c.time) && c.graca <= 0 && dist(p1, c) < 1.3 && Math.random() < 0.022) {
         this.darBola(p1);
         c.graca = 0.6;
       }
@@ -369,7 +494,7 @@ class Partida {
   tentarGolDuvidoso(c) {
     const G = this.golsDuvidosos[0];
     if (!G || this.minuto < G.minuto || this.lance) return false;
-    if (this.minuto > G.minuto + 14) { this.golsDuvidosos.shift(); return false; }
+    if (!G.semLimite && this.minuto > G.minuto + 14) { this.golsDuvidosos.shift(); return false; }
     const d = dirDe(c.time);
     if (d * c.y < -8) return false;
     const linha = this.linhaDefesa(c.time);
@@ -420,7 +545,10 @@ class Partida {
     this.passes.push(this.ultimoPasse);
     if (this.passes.length > 30) this.passes.shift();
     // De vez em quando o atacante domina com o braço
-    if (d * melhor.y > CY * 0.35 && Math.random() < 0.05) b.maoPlano = melhor;
+    if (d * melhor.y > CY * 0.35 && (this.forcarMao ? melhor.papel === "ata" : Math.random() < 0.05)) {
+      b.maoPlano = melhor;
+      if (this.forcarMao) this.forcarMao = false;
+    }
     som.chute(0.35);
     return true;
   }
@@ -447,6 +575,15 @@ class Partida {
     const up = this.ultimoPasse;
     if (up && up.para === c && c.papel === "ata" && this.relogio - up.t < 5) chanceGol += 0.3;   // cara a cara
     b.chute = { de: c, noAlvo: !fora, defende: !fora && Math.random() > chanceGol };
+    const jogada = this.jogadas[this.indiceJogada];
+    if (jogada && jogada.tipo === "lance") b.chute.defende = true;          // nada de gol surpresa
+    if (this.golGarantido && (!b_mao(this) || b.maoDe === c)) {
+      const tx3 = aleat(-2.6, 2.6);
+      const dd3 = Math.hypot(tx3 - b.x, ty - b.y);
+      b.vx = (tx3 - b.x) / dd3 * vel; b.vy = (ty - b.y) / dd3 * vel;
+      b.chute = { de: c, noAlvo: true, defende: false };
+      this.golGarantido = false;
+    }
     if (up && up.duvidoso && up.para === c && this.relogio - up.t < 6) {
       // O gol "no detalhe" entra: a decisão é do árbitro
       const tx2 = aleat(-2.6, 2.6);
@@ -534,6 +671,7 @@ class Partida {
       if (b.dono && b.dono.time === A.time) L.vantagem += dt;
       if (this.relogio >= L.fimJanela) {
         const item = this.resolverLance({ apitou: false });
+        this.agendarFim(1.6);
         this.aoEvento("naoApitado", item);
       }
     }
@@ -699,6 +837,7 @@ class Partida {
     }
     for (const j of [A, D]) if (!j.expulso) j.caido = Math.min(j.caido, 0.6);
 
+    if (decisao.tipo !== "penalti") this.agendarFim(2.2);
     if (decisao.tipo === "penalti") {
       this.iniciarPenalti(A.time);
     } else if (decisao.tipo === "falta") {
@@ -801,6 +940,7 @@ class Partida {
       const gk = this.goleiro(1 - b.chute.de.time);
       const chegou = gk && Math.abs(b.y - gk.y) < 1.4;
       if (gk && b.chute.defende && chegou && b.z < 2.6) {
+        if (b.chute.penalti) this.agendarFim(2.2);
         gk.x = b.x - Math.sign(b.x - gk.x) * 0.4;   // o goleiro se estica até a bola
         gk.lunge = 1;
         b.chute = null;
@@ -845,7 +985,7 @@ class Partida {
       const alcance = j === b.alvo ? 1.3 : 0.95;
       if (dist(j, b) < alcance) {
         const profundidade = this.ultimoPasse && this.ultimoPasse.duvidoso && b.alvo === this.ultimoPasse.para;
-        if (b.alvo && j.time !== b.alvo.time && (profundidade || b.reposicao || Math.random() < 0.5)) continue;
+        if (b.alvo && j.time !== b.alvo.time && (profundidade || b.reposicao || this.ataqueProtegido(b.alvo.time) || Math.random() < 0.5)) continue;
         this.darBola(j);
         if (j.braco > 0) {
           // dominou com o braço: a bola dá uma desviada
@@ -866,6 +1006,7 @@ class Partida {
     else if (b.maoDe && b.maoDe === autor) verdade = "mao";
     else if (this.ultimoPasse && this.ultimoPasse.para === autor && this.ultimoPasse.impedido && this.relogio - this.ultimoPasse.t < 9) verdade = "impedimento";
     b.chute = null;
+    this.alvoMargem = null;
     this.golPendente = { time, autor, verdade, t: this.relogio, passe: this.ultimoPasse };
     som.torcida(1);
     this.flash = 0.3;
@@ -873,6 +1014,7 @@ class Partida {
     if (verdade === "penalti") {
       // Pênalti convertido não precisa de revisão
       this.placar[time]++;
+      this.agendarFim(2.2);
       this.aoEvento("aviso", `⚽ GOL de pênalti! ${this.times[time][0]}`);
       this.aoEvento("placar");
       this.golPendente = null;
@@ -901,6 +1043,7 @@ class Partida {
   aplicarGol(escolha) {
     const G = this.golPendente;
     this.golPendente = null;
+    this.agendarFim(2.2);
     if (escolha === "legal") {
       this.placar[G.time]++;
       this.aoEvento("placar");
@@ -1043,6 +1186,30 @@ class Partida {
     return { nota, pontos, max, registro: this.registro, placar: this.placar };
   }
 }
+
+// Sorteia as jogadas da partida: lances para apitar e jogadas de gol.
+// O total varia para a partida durar de 1 a 2 minutos.
+function montarJogadas(liga) {
+  const nivel = LIGAS.indexOf(liga);
+  const nLances = Math.floor(aleat(3, 6.5)) + (nivel >= 3 ? 1 : 0);
+  const nGols = Math.floor(aleat(1, 3.6));
+  const lista = [];
+  for (let i = 0; i < nLances; i++) lista.push({ tipo: "lance", area: Math.random() < 0.33 });
+  for (let i = 0; i < nGols; i++) {
+    const r = Math.random();
+    const plano = r < 0.42 ? "normal" : r < 0.7 ? "impedimento" : r < 0.9 ? "legal-justo" : "mao";
+    lista.push({ tipo: "gol", plano });
+  }
+  // Embaralha e espalha pelos 90 minutos
+  lista.sort(() => Math.random() - 0.5);
+  const n = lista.length;
+  lista.forEach((j, i) => {
+    j.minuto = Math.min(90, Math.round(3 + (i + aleat(0.15, 0.85)) * (86 / n)));
+  });
+  return lista;
+}
+
+const b_mao = (P) => P.jogadas[P.indiceJogada] && P.jogadas[P.indiceJogada].plano === "mao";
 
 function setTimeoutJogo(P, seg, fn) {
   (P.timers || (P.timers = [])).push({ resta: seg, fn });

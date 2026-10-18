@@ -110,7 +110,7 @@ function telaPrejogo() {
   const escudo = (t) => `<div class="escudo"><span class="camisa" style="background:${t[1]};border-color:${t[2]}"></span>${t[0]}</div>`;
   $("confronto").innerHTML = `${escudo(confronto.casa)}<span class="vs">×</span>${escudo(confronto.fora)}`;
   const info = [
-    `⏱️ Partida de cerca de 4 minutos`,
+    `⏱️ Só os lances importantes: partida de 1 a 2 minutos`,
     liga.var ? "📺 Esta liga tem VAR: ele pode te chamar no monitor" : "Sem VAR: decida no olho" + (tem("cabine") ? " (ou na sua cabine do VAR)" : ""),
     tem("replay") ? "🔁 Você tem replay para os lances" : "Sem replay: preste atenção ao vivo",
     `🪙 Até ${liga.moedas} moedas por decisão certa`
@@ -167,7 +167,27 @@ function comecarPartida() {
   rodando = true;
   ultimo = performance.now();
   requestAnimationFrame(quadro);
-  som.apito(1);
+  mostrarTransicao({ proxima: P.jogadas[0].minuto, inicio: true, numero: 1, total: P.jogadas.length });
+}
+
+// Vinheta entre uma jogada e outra: "⏩ 34'"
+function mostrarTransicao(d) {
+  const el = $("transicao");
+  if (d.proxima === null) {
+    $("tr-min").textContent = "Fim de jogo";
+    $("tr-sub").textContent = "";
+  } else {
+    $("tr-min").textContent = `${d.inicio ? "" : "⏩ "}${d.proxima}'`;
+    $("tr-sub").textContent = d.inicio
+      ? `Começa a partida · ${d.total} jogadas para você apitar`
+      : d.intervalo ? `Intervalo · 2º tempo · jogada ${d.numero} de ${d.total}` : `Jogada ${d.numero} de ${d.total}`;
+  }
+  el.hidden = false;
+  const partida = P;
+  setTimeout(() => {
+    el.hidden = true;
+    if (P === partida && rodando && P.estado === "transicao") P.proximaJogada();
+  }, d.inicio || d.intervalo ? 1800 : 1300);
 }
 
 function sigla(nome) {
@@ -178,7 +198,9 @@ function sigla(nome) {
 function atualizarHud() {
   $("h-placar").textContent = `${P.placar[0]} × ${P.placar[1]}`;
   const m = Math.floor(P.minuto);
-  $("h-relogio").textContent = m > 90 ? `90+${m - 90}'` : m > 45 && P.tempo === 1 ? `45+${m - 45}'` : `${m}'`;
+  $("h-relogio").textContent = `${Math.min(m, 90)}'`;
+  const n = Math.max(1, Math.min(P.indiceJogada + 1, P.jogadas.length));
+  $("h-liga").textContent = `${ligaAtual().nome} · jogada ${n}/${P.jogadas.length}`;
   $("h-moedas").textContent = `🪙 +${moedasPartida}`;
 }
 
@@ -219,7 +241,7 @@ function eventoPartida(tipo, dados) {
   if (tipo === "gol") abrirGol(dados);
   if (tipo === "cartao") mostrarCartao(dados);
   if (tipo === "aviso") aviso(dados);
-  if (tipo === "intervalo") aviso("Intervalo ⏸");
+  if (tipo === "transicao") mostrarTransicao(dados);
   if (tipo === "placar") atualizarHud();
   if (tipo === "feedback") toast(dados);
   if (tipo === "naoApitado") aposNaoApitar(dados);
@@ -732,7 +754,7 @@ function telaLoja() {
 
 let estadoAntesPausa = null;
 $("b-pausa").addEventListener("click", () => {
-  if (!P || P.estado === "decisao" || P.estado === "gol") return;
+  if (!P || P.estado === "decisao" || P.estado === "gol" || P.estado === "transicao") return;
   estadoAntesPausa = P.estado;
   P.estado = "pausado";
   $("m-pausa").hidden = false;
