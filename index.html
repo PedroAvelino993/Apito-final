@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Apito Final</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" href="icon-192.png">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Apito Final">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+
+  <!-- ===== INÍCIO / CARREIRA ===== -->
+  <section class="tela" id="t-inicio">
+    <div class="topo-inicio">
+      <div class="logo">
+        <span class="logo-apito">
+          <svg viewBox="0 0 64 40" aria-hidden="true"><circle cx="20" cy="22" r="14" fill="currentColor"/><rect x="18" y="8" width="42" height="13" rx="4" fill="currentColor"/><circle cx="20" cy="22" r="5" fill="#d9f43c"/></svg>
+        </span>
+        <div>
+          <h1>Apito Final</h1>
+          <p class="sub">Simulador de árbitro</p>
+        </div>
+      </div>
+      <div class="moedas" id="moedas-inicio">🪙 0</div>
+    </div>
+
+    <div class="cartao-carreira" id="carreira"></div>
+
+    <h2 class="titulo-secao">Sua escada na carreira</h2>
+    <ol class="escada" id="escada"></ol>
+
+    <div class="botoes-inicio">
+      <button class="btn grande" id="b-jogar">Apitar próxima partida</button>
+      <div class="linha2">
+        <button class="btn sec" id="b-loja">🛒 Loja</button>
+        <button class="btn sec" id="b-regras">📘 Regras</button>
+      </div>
+    </div>
+    <p class="estatisticas" id="estatisticas"></p>
+  </section>
+
+  <!-- ===== PRÉ-JOGO ===== -->
+  <section class="tela centro" id="t-prejogo" hidden>
+    <div class="cartao-pre">
+      <p class="pre-liga" id="pre-liga"></p>
+      <div class="confronto" id="confronto"></div>
+      <ul class="pre-info" id="pre-info"></ul>
+      <button class="btn grande" id="b-entrar">Entrar em campo</button>
+      <button class="btn link" id="b-voltar-pre">Voltar</button>
+    </div>
+  </section>
+
+  <!-- ===== PARTIDA ===== -->
+  <section class="tela jogo" id="t-jogo" hidden>
+    <canvas id="campo"></canvas>
+    <div class="hud">
+      <div class="placar">
+        <span class="time-chip" id="h-casa"></span>
+        <strong id="h-placar">0 × 0</strong>
+        <span class="time-chip" id="h-fora"></span>
+      </div>
+      <div class="hud-linha">
+        <span class="relogio" id="h-relogio">0'</span>
+        <span class="hud-liga" id="h-liga"></span>
+        <span class="hud-moedas" id="h-moedas">🪙 0</span>
+      </div>
+    </div>
+    <div class="aviso" id="aviso" hidden></div>
+    <div class="toast" id="toast" hidden></div>
+    <button class="apito" id="b-apito" aria-label="Apitar">
+      <svg viewBox="0 0 64 40" aria-hidden="true"><circle cx="20" cy="22" r="14" fill="currentColor"/><rect x="18" y="8" width="42" height="13" rx="4" fill="currentColor"/><circle cx="20" cy="22" r="5" fill="rgba(255,255,255,.45)"/></svg>
+      <span>APITAR</span>
+    </button>
+    <button class="pausa" id="b-pausa" aria-label="Pausar">❚❚</button>
+  </section>
+
+  <!-- ===== DECISÃO DO LANCE ===== -->
+  <div class="modal" id="m-decisao" hidden>
+    <div class="painel">
+      <p class="painel-tag" id="dec-tag">Você parou o jogo</p>
+      <h2>O que você marcou?</h2>
+      <div class="opcoes-grade" id="dec-tipo">
+        <button data-v="falta">Falta</button>
+        <button data-v="penalti">Pênalti</button>
+        <button data-v="simulacao">Simulação</button>
+        <button data-v="nada">Lance normal</button>
+      </div>
+      <div id="dec-bloco-cartao">
+        <h3>Cartão</h3>
+        <div class="opcoes-grade tres" id="dec-cartao">
+          <button data-v="nenhum">Sem cartão</button>
+          <button data-v="amarelo"><span class="mini amarelo"></span>Amarelo</button>
+          <button data-v="vermelho"><span class="mini vermelho"></span>Vermelho</button>
+        </div>
+      </div>
+      <button class="btn replay" id="dec-replay">📺 Ver replay</button>
+      <button class="btn grande" id="dec-confirmar" disabled>Confirmar decisão</button>
+    </div>
+  </div>
+
+  <!-- ===== GOL ===== -->
+  <div class="modal" id="m-gol" hidden>
+    <div class="painel">
+      <p class="painel-tag gol-tag">⚽ GOL!</p>
+      <h2 id="gol-titulo"></h2>
+      <p class="bandeirinha" id="gol-bandeira" hidden></p>
+      <div class="opcoes-col" id="gol-opcoes">
+        <button data-v="legal">✅ Validar o gol</button>
+        <button data-v="impedimento">🚩 Anular: impedimento</button>
+        <button data-v="mao">✋ Anular: toque de mão</button>
+      </div>
+      <button class="btn replay" id="gol-replay">📺 Ver replay</button>
+    </div>
+  </div>
+
+  <!-- ===== VAR CHAMANDO ===== -->
+  <div class="modal" id="m-var" hidden>
+    <div class="painel var">
+      <div class="var-tela">VAR</div>
+      <h2>O VAR está te chamando</h2>
+      <p>Pode ter um erro claro nesse lance. Vá até o monitor, veja o replay e decida de novo.</p>
+      <button class="btn grande" id="var-ir">Ir ao monitor</button>
+    </div>
+  </div>
+
+  <!-- ===== REPLAY ===== -->
+  <div class="replay-tela" id="m-replay" hidden>
+    <div class="replay-topo">
+      <span class="ao-vivo">REPLAY</span>
+      <span id="rp-info"></span>
+      <button class="btn link claro" id="rp-fechar">Voltar ✕</button>
+    </div>
+    <canvas id="rp-canvas"></canvas>
+    <div class="replay-controles">
+      <input type="range" id="rp-barra" min="0" max="1000" value="0" aria-label="Posição do replay">
+      <div class="rp-botoes">
+        <button id="rp-inicio">↺ Início</button>
+        <button id="rp-play">Pausar</button>
+        <button id="rp-lento">🐢 Lento</button>
+        <button id="rp-zoom">🔍 Zoom</button>
+        <button id="rp-passe">📏 Passe</button>
+      </div>
+      <p class="rp-dica" id="rp-dica"></p>
+    </div>
+  </div>
+
+  <!-- ===== CARTÃO NA TELA ===== -->
+  <div class="cartao-show" id="cartao-show" hidden>
+    <div class="cartao-fisico" id="cartao-fisico"></div>
+    <p id="cartao-texto"></p>
+  </div>
+
+  <!-- ===== PAUSA ===== -->
+  <div class="modal" id="m-pausa" hidden>
+    <div class="painel">
+      <h2>Partida pausada</h2>
+      <button class="btn grande" id="pausa-voltar">Continuar</button>
+      <button class="btn link" id="pausa-sair">Abandonar partida</button>
+    </div>
+  </div>
+
+  <!-- ===== RESULTADO ===== -->
+  <section class="tela centro" id="t-resultado" hidden>
+    <div class="cartao-pre">
+      <p class="pre-liga" id="res-liga"></p>
+      <div class="nota" id="res-nota"></div>
+      <p class="res-frase" id="res-frase"></p>
+      <p class="res-placar" id="res-placar"></p>
+      <ul class="res-lista" id="res-lista"></ul>
+      <div class="res-moedas" id="res-moedas"></div>
+      <div class="res-progresso" id="res-progresso"></div>
+      <button class="btn grande" id="b-res-ok">Continuar</button>
+    </div>
+  </section>
+
+  <!-- ===== LOJA ===== -->
+  <section class="tela" id="t-loja" hidden>
+    <div class="topo-inicio">
+      <button class="btn link claro" id="b-loja-voltar">← Voltar</button>
+      <div class="moedas" id="moedas-loja">🪙 0</div>
+    </div>
+    <h2 class="titulo-secao">Melhorias de arbitragem</h2>
+    <div class="loja" id="loja-equip"></div>
+    <h2 class="titulo-secao">Visual</h2>
+    <div class="loja" id="loja-visual"></div>
+  </section>
+
+  <!-- ===== REGRAS ===== -->
+  <section class="tela" id="t-regras" hidden>
+    <div class="topo-inicio">
+      <button class="btn link claro" id="b-regras-voltar">← Voltar</button>
+    </div>
+    <h2 class="titulo-secao">Como apitar</h2>
+    <div class="regras">
+      <p><b>Toque em APITAR</b> logo depois de um jogador cair, se achar que foi falta. Se não apitar, o jogo segue.</p>
+      <div class="regra"><b>Desarme limpo</b> — o defensor toca na <i>bola primeiro</i> (a bola muda de direção antes do atacante cair). <span class="r-ok">Deixe seguir.</span></div>
+      <div class="regra"><b>Falta comum</b> — acerta a perna sem pegar a bola. <span class="r-ok">Falta, sem cartão.</span></div>
+      <div class="regra"><b>Falta imprudente</b> — carrinho por trás ou atrasado (a bola já tinha ido). <span class="r-am">Falta + amarelo.</span></div>
+      <div class="regra"><b>Entrada violenta</b> — chega muito rápido e forte, o atacante voa e fica no chão. <span class="r-vm">Falta + vermelho.</span></div>
+      <div class="regra"><b>Chance clara de gol</b> — falta comum no último defensor, com o atacante indo para o gol. <span class="r-vm">Vermelho</span> (na área: pênalti + amarelo).</div>
+      <div class="regra"><b>Simulação</b> — o atacante cai sem ninguém encostar, com os braços para cima. <span class="r-am">Simulação + amarelo para o atacante.</span></div>
+      <div class="regra"><b>Pênalti</b> — qualquer falta do defensor <i>dentro da grande área</i> vira pênalti.</div>
+      <div class="regra"><b>Vantagem</b> — numa falta comum fora da área, se o time atacante continuou com a bola, não apitar também está certo.</div>
+      <div class="regra"><b>Impedimento</b> — no momento do <i>passe</i>, o atacante que recebe está à frente do penúltimo defensor (o goleiro conta) e no campo de ataque. Gol assim deve ser anulado.</div>
+      <div class="regra"><b>Mão</b> — o atacante domina a bola com o braço antes de fazer o gol. Anule.</div>
+      <p class="dica">Dica: compre <b>Replay</b>, <b>Câmera lenta</b> e <b>Ângulo aproximado</b> na loja para ver os lances com calma. Nas ligas com VAR, o VAR pode te chamar quando você erra um lance importante.</p>
+    </div>
+  </section>
+
+  <script src="dados.js"></script>
+  <script src="motor.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
